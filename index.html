@@ -133,21 +133,48 @@
       list-style: none;
     }
 
+    .filters {
+      display: flex;
+      gap: 5px;
+      padding: 14px 20px 0;
+    }
+
+    .filter-button {
+      padding: 5px 10px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .filter-button[aria-pressed="true"] {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
     .task {
       display: flex;
       align-items: center;
-      gap: 13px;
+      gap: 9px;
       min-height: 62px;
       border-bottom: 1px solid var(--line);
       animation: arrive 220ms ease both;
     }
 
     .task:last-child { border-bottom: 0; }
+    .task.is-dragging { opacity: .45; }
+    .task.drop-before { box-shadow: inset 0 2px var(--accent); }
+    .task.drop-after { box-shadow: inset 0 -2px var(--accent); }
 
     @keyframes arrive {
       from { opacity: 0; transform: translateY(5px); }
       to { opacity: 1; transform: translateY(0); }
     }
+
+    .task-details { display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 10px 0; }
 
     .check {
       display: grid;
@@ -179,6 +206,53 @@
     }
 
     .task.is-done .task-text { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+
+    .task-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .due-label.is-overdue { color: var(--danger); }
+
+    .due-date-input {
+      width: 112px;
+      min-width: 0;
+      padding: 2px 3px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .due-date-control { display: flex; align-items: center; gap: 4px; }
+    .due-date-input:hover, .due-date-input:focus-visible { border-color: var(--line); }
+
+    .order-controls { display: flex; flex: 0 0 auto; }
+
+    .order-button, .drag-handle {
+      display: grid;
+      width: 27px;
+      height: 32px;
+      padding: 0;
+      place-items: center;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .order-button:disabled { visibility: hidden; }
+    .order-button:hover, .drag-handle:hover { background: var(--surface-soft); color: var(--ink); }
+    .order-button svg, .drag-handle svg { width: 15px; height: 15px; }
+    .drag-handle { cursor: grab; }
+    .drag-handle:active { cursor: grabbing; }
 
     .delete {
       display: grid;
@@ -274,6 +348,13 @@
     .clear-button:hover { color: var(--danger); }
     .clear-button:disabled { visibility: hidden; }
 
+    .empty-filter {
+      padding: 22px 4px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
     button:focus-visible, input:focus-visible {
       outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
       outline-offset: 3px;
@@ -293,6 +374,7 @@
       body { padding: 44px 18px 32px; }
       .brand { margin-bottom: 28px; }
       .task-list { padding-right: 16px; padding-left: 16px; }
+      .filters { padding-right: 16px; padding-left: 16px; }
       .add-form { margin-right: 16px; margin-left: 16px; }
     }
 
@@ -317,6 +399,11 @@
       <span class="count-pill" id="task-count" aria-live="polite"></span>
     </header>
     <section class="card" aria-label="To-do list">
+      <nav class="filters" aria-label="Filter tasks">
+        <button class="filter-button" type="button" data-filter="all" aria-pressed="true">All</button>
+        <button class="filter-button" type="button" data-filter="active" aria-pressed="false">Active</button>
+        <button class="filter-button" type="button" data-filter="completed" aria-pressed="false">Completed</button>
+      </nav>
       <ul class="task-list" id="task-list" aria-live="polite"></ul>
       <form class="add-form" id="add-form">
         <span class="add-plus" aria-hidden="true">
@@ -331,14 +418,15 @@
       <span id="progress"></span>
       <button class="clear-button" id="clear-completed" type="button">Clear completed</button>
     </footer>
+    <span class="sr-only" id="task-announcement" aria-live="polite"></span>
   </main>
   <script>
     (() => {
       const STORAGE_KEY = "little-things-tasks-v1";
       const examples = [
-        { id: "sample-1", text: "Plan the week and set a few priorities", done: false },
-        { id: "sample-2", text: "Take a proper lunch break", done: true },
-        { id: "sample-3", text: "Pick up a few groceries on the way home", done: false }
+        { id: "sample-1", text: "Plan the week and set a few priorities", done: false, dueDate: "" },
+        { id: "sample-2", text: "Take a proper lunch break", done: true, dueDate: "" },
+        { id: "sample-3", text: "Pick up a few groceries on the way home", done: false, dueDate: "" }
       ];
 
       const list = document.querySelector("#task-list");
@@ -347,7 +435,11 @@
       const count = document.querySelector("#task-count");
       const progress = document.querySelector("#progress");
       const clearButton = document.querySelector("#clear-completed");
+      const announcement = document.querySelector("#task-announcement");
+      const filterButtons = [...document.querySelectorAll(".filter-button")];
       let tasks = loadTasks();
+      let activeFilter = "all";
+      let draggedTaskId = null;
 
       document.querySelector("#today").textContent = new Intl.DateTimeFormat(undefined, {
         weekday: "long", month: "long", day: "numeric"
@@ -362,11 +454,66 @@
           return parsed.filter(task =>
             task && typeof task.id === "string" &&
             typeof task.text === "string" && typeof task.done === "boolean"
-          );
+          ).map(task => ({
+            ...task,
+            dueDate: isValidDate(task.dueDate) ? task.dueDate : ""
+          }));
         } catch (error) {
           console.error("Could not load saved tasks:", error);
           return examples;
         }
+      }
+
+      function isValidDate(value) {
+        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+        const [year, month, day] = value.split("-").map(Number);
+        const date = new Date(year, month - 1, day);
+        return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+      }
+
+      function todayString() {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      }
+
+      function formatDate(value) {
+        const [year, month, day] = value.split("-").map(Number);
+        return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" })
+          .format(new Date(year, month - 1, day));
+      }
+
+      function visibleTasks() {
+        return tasks.filter(task =>
+          activeFilter === "all" ||
+          (activeFilter === "active" && !task.done) ||
+          (activeFilter === "completed" && task.done)
+        );
+      }
+
+      function reorderVisible(sourceId, targetId, after = false) {
+        if (sourceId === targetId) return false;
+        const visible = visibleTasks();
+        const sourceIndex = visible.findIndex(task => task.id === sourceId);
+        const targetIndex = visible.findIndex(task => task.id === targetId);
+        if (sourceIndex < 0 || targetIndex < 0) return false;
+        const reordered = [...visible];
+        const [source] = reordered.splice(sourceIndex, 1);
+        let insertionIndex = reordered.findIndex(task => task.id === targetId);
+        if (after) insertionIndex++;
+        reordered.splice(insertionIndex, 0, source);
+        const visibleSlots = tasks.map((task, index) => visible.some(item => item.id === task.id) ? index : -1).filter(index => index >= 0);
+        visibleSlots.forEach((slot, index) => { tasks[slot] = reordered[index]; });
+        return true;
+      }
+
+      function moveTask(taskId, direction) {
+        const visible = visibleTasks();
+        const index = visible.findIndex(task => task.id === taskId);
+        const target = visible[index + direction];
+        if (!target || !reorderVisible(taskId, target.id, direction > 0)) return;
+        saveTasks();
+        render();
+        announcement.textContent = `Moved ${visible[index].text} ${direction < 0 ? "up" : "down"}.`;
       }
 
       function saveTasks() {
@@ -380,9 +527,17 @@
 
       function render() {
         list.replaceChildren();
-        for (const task of tasks) {
+        const shownTasks = visibleTasks();
+        if (shownTasks.length === 0 && tasks.length > 0) {
+          const empty = document.createElement("li");
+          empty.className = "empty-filter";
+          empty.textContent = activeFilter === "active" ? "No active tasks" : "No completed tasks";
+          list.append(empty);
+        }
+        for (const [index, task] of shownTasks.entries()) {
           const row = document.createElement("li");
           row.className = `task${task.done ? " is-done" : ""}`;
+          row.dataset.taskId = task.id;
 
           const toggle = document.createElement("button");
           toggle.className = "check";
@@ -400,6 +555,72 @@
           text.className = "task-text";
           text.textContent = task.text;
 
+          const details = document.createElement("div");
+          details.className = "task-details";
+          details.append(text);
+
+          const dateInput = document.createElement("input");
+          dateInput.className = "due-date-input";
+          dateInput.type = "date";
+          dateInput.value = task.dueDate || "";
+          dateInput.setAttribute("aria-label", `Due date for ${task.text}`);
+          dateInput.addEventListener("change", () => {
+            task.dueDate = isValidDate(dateInput.value) ? dateInput.value : "";
+            saveTasks();
+            render();
+          });
+          const meta = document.createElement("div");
+          meta.className = "task-meta";
+          const dateControl = document.createElement("label");
+          dateControl.className = "due-date-control";
+          dateControl.append("Due", dateInput);
+          meta.append(dateControl);
+
+          if (task.dueDate) {
+            const overdue = !task.done && task.dueDate < todayString();
+            const dueLabel = document.createElement("span");
+            dueLabel.className = `due-label${overdue ? " is-overdue" : ""}`;
+            dueLabel.textContent = `${overdue ? "Overdue · " : "Due "}${formatDate(task.dueDate)}`;
+            meta.append(dueLabel);
+          }
+          details.append(meta);
+
+          const orderControls = document.createElement("span");
+          orderControls.className = "order-controls";
+
+          const moveUp = document.createElement("button");
+          moveUp.className = "order-button";
+          moveUp.type = "button";
+          moveUp.disabled = index === 0;
+          moveUp.setAttribute("aria-label", `Move up: ${task.text}`);
+          moveUp.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5-5 5 5"/></svg>';
+          moveUp.addEventListener("click", () => moveTask(task.id, -1));
+
+          const moveDown = document.createElement("button");
+          moveDown.className = "order-button";
+          moveDown.type = "button";
+          moveDown.disabled = index === shownTasks.length - 1;
+          moveDown.setAttribute("aria-label", `Move down: ${task.text}`);
+          moveDown.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg>';
+          moveDown.addEventListener("click", () => moveTask(task.id, 1));
+
+          const dragHandle = document.createElement("button");
+          dragHandle.className = "drag-handle";
+          dragHandle.type = "button";
+          dragHandle.draggable = true;
+          dragHandle.setAttribute("aria-label", `Drag to reorder: ${task.text}. Use move up and move down buttons as an alternative.`);
+          dragHandle.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="7" cy="5" r="1.2"/><circle cx="13" cy="5" r="1.2"/><circle cx="7" cy="10" r="1.2"/><circle cx="13" cy="10" r="1.2"/><circle cx="7" cy="15" r="1.2"/><circle cx="13" cy="15" r="1.2"/></svg>';
+          dragHandle.addEventListener("dragstart", event => {
+            draggedTaskId = task.id;
+            row.classList.add("is-dragging");
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", task.id);
+          });
+          dragHandle.addEventListener("dragend", () => {
+            draggedTaskId = null;
+            list.querySelectorAll(".task").forEach(item => item.classList.remove("is-dragging", "drop-before", "drop-after"));
+          });
+
           const remove = document.createElement("button");
           remove.className = "delete";
           remove.type = "button";
@@ -411,7 +632,8 @@
             render();
           });
 
-          row.append(toggle, text, remove);
+          orderControls.append(moveUp, moveDown, dragHandle);
+          row.append(toggle, details, orderControls, remove);
           list.append(row);
         }
 
@@ -422,7 +644,40 @@
           ? `${completed} of ${tasks.length} completed`
           : "A little space to start fresh";
         clearButton.disabled = completed === 0;
+        filterButtons.forEach(button => {
+          button.setAttribute("aria-pressed", String(button.dataset.filter === activeFilter));
+        });
       }
+
+      filterButtons.forEach(button => button.addEventListener("click", () => {
+        activeFilter = button.dataset.filter;
+        render();
+      }));
+
+      list.addEventListener("dragover", event => {
+        if (!draggedTaskId) return;
+        const row = event.target.closest(".task");
+        if (!row || row.dataset.taskId === draggedTaskId) return;
+        event.preventDefault();
+        const bounds = row.getBoundingClientRect();
+        const after = event.clientY > bounds.top + bounds.height / 2;
+        list.querySelectorAll(".task").forEach(item => item.classList.remove("drop-before", "drop-after"));
+        row.classList.add(after ? "drop-after" : "drop-before");
+        event.dataTransfer.dropEffect = "move";
+      });
+
+      list.addEventListener("drop", event => {
+        const row = event.target.closest(".task");
+        if (!draggedTaskId || !row) return;
+        event.preventDefault();
+        const bounds = row.getBoundingClientRect();
+        const after = event.clientY > bounds.top + bounds.height / 2;
+        if (reorderVisible(draggedTaskId, row.dataset.taskId, after)) {
+          saveTasks();
+          render();
+          announcement.textContent = "Task order updated.";
+        }
+      });
 
       form.addEventListener("submit", event => {
         event.preventDefault();
@@ -431,7 +686,7 @@
           input.focus();
           return;
         }
-        tasks.push({ id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, text, done: false });
+        tasks.push({ id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, text, done: false, dueDate: "" });
         input.value = "";
         saveTasks();
         render();
