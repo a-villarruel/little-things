@@ -43,6 +43,16 @@ shown only when the storage key has not been set; clearing or deleting tasks
 does not restore them. Storage is local to the browser profile and is not
 synchronized across devices.
 
+## Data portability
+
+Tasks are stored locally in browser `localStorage` under
+`little-things-tasks-v1`. There is no built-in export, import, or
+synchronization. To try to transfer tasks, use browser developer tools to copy
+the value for that key and set it for the same key in the destination browser
+profile. Because the app is opened as a local file, storage behavior can vary
+between browsers and profiles; this method is not guaranteed to work or recover
+data.
+
 ## Accessibility
 
 Interactive controls have accessible names and visible focus indicators. The
