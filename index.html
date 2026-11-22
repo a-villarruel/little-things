@@ -490,6 +490,54 @@
         );
       }
 
+      function focusTaskControl(taskId, selector) {
+        const row = [...list.querySelectorAll(".task")]
+          .find(item => item.dataset.taskId === taskId);
+        const control = row?.querySelector(selector);
+        if (!control || control.disabled) return false;
+        control.focus();
+        return true;
+      }
+
+      function focusNearbyTaskControl(index, selector) {
+        const rows = [...list.querySelectorAll(".task")];
+        const row = rows[index] || rows[index - 1];
+        const control = row?.querySelector(selector);
+        if (!control || control.disabled) return false;
+        control.focus();
+        return true;
+      }
+
+      function focusTaskListFallback() {
+        if (tasks.length === 0) {
+          input.focus();
+          return;
+        }
+        filterButtons.find(button => button.dataset.filter === activeFilter)?.focus();
+      }
+
+      function restoreTaskControl(taskId, index, selector) {
+        if (focusTaskControl(taskId, selector)) return;
+        if (focusNearbyTaskControl(index, selector)) return;
+        focusTaskListFallback();
+      }
+
+      function focusMoveControl(taskId, direction) {
+        const row = [...list.querySelectorAll(".task")]
+          .find(item => item.dataset.taskId === taskId);
+        if (!row) return;
+        const controls = [...row.querySelectorAll(".order-button")];
+        const preferred = controls[direction < 0 ? 0 : 1];
+        const opposite = controls[direction < 0 ? 1 : 0];
+        if (preferred && !preferred.disabled) {
+          preferred.focus();
+        } else if (opposite && !opposite.disabled) {
+          opposite.focus();
+        } else {
+          row.querySelector(".check")?.focus();
+        }
+      }
+
       function reorderVisible(sourceId, targetId, after = false) {
         if (sourceId === targetId) return false;
         const visible = visibleTasks();
@@ -513,6 +561,7 @@
         if (!target || !reorderVisible(taskId, target.id, direction > 0)) return;
         saveTasks();
         render();
+        focusMoveControl(taskId, direction);
         announcement.textContent = `Moved ${visible[index].text} ${direction < 0 ? "up" : "down"}.`;
       }
 
@@ -546,9 +595,11 @@
           toggle.setAttribute("aria-pressed", String(task.done));
           toggle.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg>';
           toggle.addEventListener("click", () => {
+            const visibleIndex = visibleTasks().findIndex(item => item.id === task.id);
             task.done = !task.done;
             saveTasks();
             render();
+            restoreTaskControl(task.id, visibleIndex, ".check");
           });
 
           const text = document.createElement("span");
@@ -627,9 +678,15 @@
           remove.setAttribute("aria-label", `Delete: ${task.text}`);
           remove.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.5 6h11M8 6V4.5h4V6m2.5 0-.6 10H6.1L5.5 6m2.8 3v4m3.4-4v4"/></svg>';
           remove.addEventListener("click", () => {
+            const visibleIndex = visibleTasks().findIndex(item => item.id === task.id);
             tasks = tasks.filter(item => item.id !== task.id);
             saveTasks();
             render();
+            if (tasks.length === 0 || !list.querySelector(".task")) {
+              focusTaskListFallback();
+            } else {
+              restoreTaskControl(task.id, visibleIndex, ".delete");
+            }
           });
 
           orderControls.append(moveUp, moveDown, dragHandle);
